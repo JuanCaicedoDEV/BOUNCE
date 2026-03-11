@@ -16,22 +16,23 @@ class CounselorState(TypedDict):
     identified_careers: List[dict]
     cv_data: str
     phase: str
-    university_id: str  # tenant identifier
+    university_id: str
+    retrieved_context: str   # shared context built by search nodes
 
 
-# ── Models ───────────────────────────────────────────────────────────────────
+# ── Models ────────────────────────────────────────────────────────────────────
 llm = ChatGoogleGenerativeAI(model="gemini-3-flash-preview")
 embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001")
 CHROMA_DIR = str(Path(__file__).parent / "chroma_db")
 
-# Legacy O*NET collection (fallback)
+# Node A: O*NET general career database
 _onet_vs = Chroma(
     persist_directory=CHROMA_DIR,
     embedding_function=embeddings,
     collection_name="onet_career_data",
 )
 
-# University programs collection (multi-tenant, filtered by university_id)
+# Node B: University-uploaded programs (multi-tenant)
 _programs_vs = Chroma(
     persist_directory=CHROMA_DIR,
     embedding_function=embeddings,
@@ -48,7 +49,7 @@ RESPONSE RULES — follow strictly:
 - End every message with ONE simple question — never multiple.
 - When suggesting a career/program, give just the name + one sentence on why it fits them.
 - Use bullet points or bold ONLY when presenting a list of options. Never for regular conversation.
-- Never repeat what the user just said back to them.
+- Never repeat what the user said back to them.
 - Respond in English.
 
 FLOW:
@@ -59,44 +60,6 @@ FLOW:
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
-def _search_programs(query: str, university_id: str, k: int = 3) -> str:
-    """Search the university's uploaded programs first, fall back to O*NET."""
-    if not query.strip():
-        return ""
-
-    context = ""
-
-    # 1. University-specific programs (uploaded PDFs)
-    try:
-        results = _programs_vs.similarity_search(
-            query,
-            k=k,
-            filter={"university_id": university_id},
-        )
-        if results:
-            context += "\n\n[Programs offered by this institution:]\n"
-            for r in results:
-                name = r.metadata.get("program_name", "Program")
-                context += f"\n• **{name}**: {r.page_content[:350]}\n"
-            context += "\n[Prioritize suggesting these specific programs.]\n"
-    except Exception:
-        pass
-
-    # 2. Fall back to O*NET general career data if no university programs found
-    if not context:
-        try:
-            results = _onet_vs.similarity_search(query, k=k)
-            if results:
-                context += "\n\n[Relevant career paths:]\n"
-                for r in results:
-                    title = r.metadata.get("title", "Career")
-                    context += f"\n• **{title}**: {r.page_content[:350]}\n"
-        except Exception:
-            pass
-
-    return context
-
-
 def _build_query(messages: List[BaseMessage], cv_data: str) -> str:
     recent = [m.content for m in messages[-6:] if isinstance(m.content, str)]
     parts = recent + ([cv_data[:500]] if cv_data else [])
@@ -110,84 +73,110 @@ def _last_user_message(messages: List[BaseMessage]) -> str:
     return ""
 
 
-# ── Nodes ─────────────────────────────────────────────────────────────────────
+# ── Search nodes (RAG) ────────────────────────────────────────────────────────
+def onet_search_node(state: CounselorState) -> dict:
+    """Searches the O*NET general career database."""
+    messages = state["messages"]
+    cv_data = state.get("cv_data", "")
+    query = _build_query(messages, cv_data)
+
+    if not query.strip():
+        return {"retrieved_context": ""}
+
+    try:
+        results = _onet_vs.similarity_search(query, k=3)
+    except Exception:
+        return {"retrieved_context": ""}
+
+    if not results:
+        return {"retrieved_context": ""}
+
+    context = "\n\n[General career paths (O*NET):]\n"
+    for r in results:
+        title = r.metadata.get("title", "Career")
+        context += f"\n• **{title}**: {r.page_content[:350]}\n"
+    return {"retrieved_context": context}
+
+
+def programs_search_node(state: CounselorState) -> dict:
+    """Searches the university's uploaded program PDFs."""
+    messages = state["messages"]
+    cv_data = state.get("cv_data", "")
+    university_id = state.get("university_id", "laguardia")
+    query = _build_query(messages, cv_data)
+
+    if not query.strip():
+        return {"retrieved_context": state.get("retrieved_context", "")}
+
+    try:
+        results = _programs_vs.similarity_search(
+            query, k=3, filter={"university_id": university_id}
+        )
+    except Exception:
+        return {"retrieved_context": state.get("retrieved_context", "")}
+
+    if not results:
+        return {"retrieved_context": state.get("retrieved_context", "")}
+
+    # University programs take priority — prepend them
+    context = "\n\n[Programs offered by this institution — prioritize these:]\n"
+    for r in results:
+        name = r.metadata.get("program_name", "Program")
+        context += f"\n• **{name}**: {r.page_content[:350]}\n"
+
+    # Append O*NET context if it exists
+    existing = state.get("retrieved_context", "")
+    return {"retrieved_context": context + existing}
+
+
+# ── Counselor nodes ───────────────────────────────────────────────────────────
 WELCOME_MESSAGE = (
     "Thanks for connecting today. To start, what made you decide to explore "
     "new career options at this moment?"
 )
 
 
-def intake_node(state: CounselorState):
+def intake_node(state: CounselorState) -> dict:
+    """Main conversation node. Uses retrieved_context built by search nodes."""
     messages = state["messages"]
     cv_data = state.get("cv_data", "")
-    university_id = state.get("university_id", "laguardia")
+    retrieved_context = state.get("retrieved_context", "")
 
     if not messages:
         return {"messages": [AIMessage(content=WELCOME_MESSAGE)], "phase": "intake"}
 
-    query = _build_query(messages, cv_data)
-    career_context = _search_programs(query, university_id, k=3)
+    cv_context = (
+        f"\n\n[User's CV:\n{cv_data[:800]}\nReference specific skills from it.]\n"
+        if cv_data else ""
+    )
 
-    cv_context = ""
-    if cv_data:
-        cv_context = (
-            f"\n\n[User's CV:\n{cv_data[:800]}\n"
-            "Reference specific skills or experience from it.]\n"
-        )
-
-    system = BASE_SYSTEM_PROMPT + cv_context + career_context
+    system = BASE_SYSTEM_PROMPT + cv_context + retrieved_context
 
     response = llm.invoke(
         [{"role": "system", "content": system}] + messages[-20:]
     )
-    return {"messages": [response], "phase": "intake"}
+    return {"messages": [response], "phase": "intake", "retrieved_context": ""}
 
 
-def detail_node(state: CounselorState):
+def detail_node(state: CounselorState) -> dict:
+    """Deep dive on a specific program/career. Uses retrieved_context from search nodes."""
     messages = state["messages"]
     cv_data = state.get("cv_data", "")
-    university_id = state.get("university_id", "laguardia")
-
-    last_msg = _last_user_message(messages)
-
-    # Deep search for this specific program
-    detail_context = ""
-    try:
-        results = _programs_vs.similarity_search(
-            last_msg, k=1, filter={"university_id": university_id}
-        )
-        if results:
-            r = results[0]
-            name = r.metadata.get("program_name", "Program")
-            detail_context = (
-                f"\n\n[Full details for '{name}':\n{r.page_content}\n"
-                "Cover thoroughly: what students learn, requirements, career outcomes, "
-                "duration, and why it fits this person.]\n"
-            )
-    except Exception:
-        pass
-
-    # Fall back to O*NET
-    if not detail_context:
-        try:
-            results = _onet_vs.similarity_search(last_msg, k=1)
-            if results:
-                r = results[0]
-                title = r.metadata.get("title", "Career")
-                detail_context = (
-                    f"\n\n[Details about '{title}':\n{r.page_content}\n"
-                    "Cover: day-to-day tasks, skills, education pathway, salary.]\n"
-                )
-        except Exception:
-            pass
+    retrieved_context = state.get("retrieved_context", "")
 
     cv_context = f"\n\n[User's CV:\n{cv_data[:800]}\n]\n" if cv_data else ""
-    system = BASE_SYSTEM_PROMPT + cv_context + detail_context
+
+    detail_instruction = (
+        "\n[Answer thoroughly: what students learn, requirements, outcomes, "
+        "duration, salary range if available, and why it fits this person.]\n"
+    )
+
+    system = BASE_SYSTEM_PROMPT + cv_context + retrieved_context + detail_instruction
 
     response = llm.invoke(
         [{"role": "system", "content": system}] + messages[-20:]
     )
-    return {"messages": [response], "phase": "detail"}
+    return {"messages": [response], "phase": "detail", "retrieved_context": ""}
 
 
 # ── Router ────────────────────────────────────────────────────────────────────
@@ -207,13 +196,26 @@ def route_message(state: CounselorState) -> str:
     return "intake"
 
 
-# ── Graph ──────────────────────────────────────────────────────────────────────
+# ── Graph ─────────────────────────────────────────────────────────────────────
 workflow = StateGraph(CounselorState)
+
+# Search nodes (run in sequence: O*NET first, then university programs on top)
+workflow.add_node("onet_search", onet_search_node)
+workflow.add_node("programs_search", programs_search_node)
+
+# Counselor nodes
 workflow.add_node("intake", intake_node)
 workflow.add_node("detail", detail_node)
 
+# Edges
 workflow.add_conditional_edges(
     START,
+    route_message,
+    {"intake": "onet_search", "detail": "onet_search"},
+)
+workflow.add_edge("onet_search", "programs_search")
+workflow.add_conditional_edges(
+    "programs_search",
     route_message,
     {"intake": "intake", "detail": "detail"},
 )
