@@ -1,9 +1,13 @@
 import { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { LoginScreen } from './features/auth/LoginScreen';
+import { AdminLogin } from './features/admin/AdminLogin';
+import { AdminDashboard } from './features/admin/AdminDashboard';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowUp, GraduationCap, Paperclip, X, FileText } from 'lucide-react';
 import axios from 'axios';
+
+const isAdminRoute = window.location.pathname.startsWith('/admin');
 
 const QUICK_REPLIES = [
   'Looking for better pay',
@@ -13,7 +17,17 @@ const QUICK_REPLIES = [
 
 type Message = { role: 'user' | 'assistant'; content: string };
 
+// ── Admin portal ──────────────────────────────────────────────────────────────
+function AdminApp() {
+  const [admin, setAdmin] = useState<{ id: string; name: string } | null>(null);
+  if (!admin) return <AdminLogin onLogin={(id, name) => setAdmin({ id, name })} />;
+  return <AdminDashboard universityId={admin.id} universityName={admin.name} onLogout={() => setAdmin(null)} />;
+}
+
+// ── Router ────────────────────────────────────────────────────────────────────
 export default function App() {
+  if (isAdminRoute) return <AdminApp />;
+
   const [user, setUser] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([
     {
