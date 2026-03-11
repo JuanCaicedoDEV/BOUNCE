@@ -22,8 +22,10 @@ class CounselorState(TypedDict):
 llm = ChatGoogleGenerativeAI(model="gemini-3-flash-preview")
 
 embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001")
+CHROMA_DIR = str(Path(__file__).parent / "chroma_db")
+
 vectorstore = Chroma(
-    persist_directory="/Users/juanfelipe/Documents/Affila/Bounce/backend/chroma_db",
+    persist_directory=CHROMA_DIR,
     embedding_function=embeddings,
     collection_name="onet_career_data"
 )

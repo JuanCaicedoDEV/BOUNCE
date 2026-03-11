@@ -63,7 +63,8 @@ export default function App() {
     setIsLoading(true);
 
     try {
-      const response = await axios.post('http://localhost:8001/chat', {
+      const apiUrl = import.meta.env.VITE_API_URL ?? 'http://localhost:8001';
+      const response = await axios.post(`${apiUrl}/chat`, {
         messages: updatedMessages,
         user_id: user || 'guest',
         cv_data: cvFile?.content ?? null,

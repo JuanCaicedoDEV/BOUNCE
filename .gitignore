@@ -9,8 +9,8 @@ __pycache__/
 backend/.env
 .env
 
-# ChromaDB data
-backend/chroma_db/
+# ChromaDB data — committed for Railway MVP deployment
+# backend/chroma_db/
 
 # Node
 frontend/node_modules/
