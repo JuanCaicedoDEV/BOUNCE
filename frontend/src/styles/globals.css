@@ -1,0 +1,121 @@
+@import "tailwindcss";
+
+/* ── Custom theme tokens ── */
+@theme {
+  --font-sans: 'Outfit', 'Inter', system-ui, sans-serif;
+
+  /* Brand purple */
+  --color-brand: #8251ee;
+  --color-brand-light: #a37ef5;
+  --color-brand-dark: #5b35c1;
+
+  /* Accent */
+  --color-accent-mint: #10b981;
+  --color-accent-green: #22c55e;
+
+  /* Dark surfaces (used by LoginScreen) */
+  --color-surface: #141414;
+  --color-surface-raised: #1c1c1c;
+  --color-surface-overlay: #242424;
+  --color-surface-border: #2a2a2a;
+
+  /* Custom shadows */
+  --shadow-glow-brand: 0 0 20px rgba(130, 81, 238, 0.35);
+
+  /* Custom animations */
+  --animate-pulse-glow: pulse-glow 4s ease-in-out infinite;
+  --animate-blink: blink 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse-glow {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.9; }
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+
+body {
+  font-family: 'Outfit', 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+/* ── LoginScreen dark-theme classes ── */
+@layer components {
+  .glass-container {
+    background-color: #141414;
+    border: 1px solid #2a2a2a;
+  }
+
+  .glass-card {
+    background-color: #1c1c1c;
+    border: 1px solid #2a2a2a;
+    transition: all 0.3s;
+  }
+
+  .glass-input {
+    background-color: #1c1c1c;
+    border: 1px solid #2a2a2a;
+    border-radius: 0.75rem;
+    padding: 0.75rem 1rem;
+    font-size: 0.875rem;
+    color: white;
+    outline: none;
+    transition: border-color 0.2s;
+    width: 100%;
+  }
+
+  .glass-input::placeholder {
+    color: rgba(255, 255, 255, 0.3);
+  }
+
+  .glass-input:focus {
+    border-color: rgba(130, 81, 238, 0.5);
+  }
+
+  .btn-primary {
+    background-color: #8251ee;
+    color: white;
+    font-weight: 600;
+    padding: 0.75rem 1.5rem;
+    border-radius: 0.75rem;
+    transition: all 0.2s;
+    border: none;
+    cursor: pointer;
+  }
+
+  .btn-primary:hover {
+    background-color: #a37ef5;
+  }
+
+  .btn-primary:active {
+    transform: scale(0.98);
+  }
+
+  .btn-secondary {
+    background-color: #1c1c1c;
+    border: 1px solid #2a2a2a;
+    color: rgba(255, 255, 255, 0.8);
+    font-weight: 500;
+    padding: 0.75rem 1.5rem;
+    border-radius: 0.75rem;
+    transition: all 0.2s;
+    cursor: pointer;
+  }
+
+  .btn-secondary:hover {
+    background-color: #242424;
+    color: white;
+  }
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.25); }
+
+::selection { background: rgba(130, 81, 238, 0.25); }

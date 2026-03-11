@@ -1,0 +1,7 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "counselor": "./backend/counselor_graph.py:app"
+  },
+  "env": "./backend/.env"
+}
