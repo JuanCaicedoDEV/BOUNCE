@@ -6,7 +6,7 @@ so the counselor agent can filter by tenant.
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_chroma import Chroma
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from backend.chunking import split_by_sections
 from pathlib import Path
 from pypdf import PdfReader
 import io
@@ -35,9 +35,6 @@ def _extract_text(file_bytes: bytes, filename: str) -> str:
     return file_bytes.decode("utf-8", errors="ignore").strip()
 
 
-splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
-
-
 @router.post("/upload")
 async def upload_program(
     university_id: str = Form(...),
@@ -51,29 +48,27 @@ async def upload_program(
     if not text:
         raise HTTPException(status_code=400, detail="Could not extract text from file.")
 
-    chunks = splitter.split_text(text)
     doc_id = str(uuid.uuid4())
+    base_meta = {
+        "university_id": university_id,
+        "program_name": program_name,
+        "filename": file.filename,
+        "doc_id": doc_id,
+    }
+    doc_chunks = split_by_sections(text, base_meta)
 
     vs = _get_vectorstore()
     vs.add_texts(
-        texts=chunks,
-        metadatas=[
-            {
-                "university_id": university_id,
-                "program_name": program_name,
-                "filename": file.filename,
-                "doc_id": doc_id,
-            }
-            for _ in chunks
-        ],
-        ids=[f"{doc_id}_{i}" for i in range(len(chunks))],
+        texts=[c.text for c in doc_chunks],
+        metadatas=[c.metadata for c in doc_chunks],
+        ids=[f"{doc_id}_{i}" for i in range(len(doc_chunks))],
     )
 
     return {
         "status": "indexed",
         "program_name": program_name,
         "university_id": university_id,
-        "chunks": len(chunks),
+        "chunks": len(doc_chunks),
         "doc_id": doc_id,
     }
 

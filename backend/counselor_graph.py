@@ -18,6 +18,7 @@ class CounselorState(TypedDict):
     phase: str
     university_id: str
     retrieved_context: str   # shared context built by search nodes
+    search_query: str        # reformulated query for retrieval
 
 
 # ── Models ────────────────────────────────────────────────────────────────────
@@ -60,6 +61,35 @@ FLOW:
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+QUERY_REFORM_PROMPT = """Extract a concise semantic search query (max 2 sentences) from this career counseling conversation.
+Focus on: the person's background, skills, goals, and career interests.
+Output ONLY the query text, nothing else."""
+
+def query_reformulation_node(state: CounselorState) -> dict:
+    """Reformulates the conversation into a focused semantic query for retrieval."""
+    messages = state["messages"]
+    cv_data = state.get("cv_data", "")
+
+    if not messages:
+        return {"search_query": "", "retrieved_context": ""}
+
+    # Build a short summary of the conversation for the LLM
+    convo = "\n".join(
+        f"{'User' if isinstance(m, HumanMessage) else 'Counselor'}: {m.content}"
+        for m in messages[-8:]
+        if isinstance(m.content, str)
+    )
+    if cv_data:
+        convo += f"\n\nCV excerpt: {cv_data[:400]}"
+
+    response = llm.invoke([
+        {"role": "system", "content": QUERY_REFORM_PROMPT},
+        {"role": "user", "content": convo},
+    ])
+    query = response.content if isinstance(response.content, str) else str(response.content)
+    return {"search_query": query.strip(), "retrieved_context": ""}
+
+
 def _build_query(messages: List[BaseMessage], cv_data: str) -> str:
     recent = [m.content for m in messages[-6:] if isinstance(m.content, str)]
     parts = recent + ([cv_data[:500]] if cv_data else [])
@@ -76,9 +106,7 @@ def _last_user_message(messages: List[BaseMessage]) -> str:
 # ── Search nodes (RAG) ────────────────────────────────────────────────────────
 def onet_search_node(state: CounselorState) -> dict:
     """Searches the O*NET general career database."""
-    messages = state["messages"]
-    cv_data = state.get("cv_data", "")
-    query = _build_query(messages, cv_data)
+    query = state.get("search_query") or _build_query(state["messages"], state.get("cv_data", ""))
 
     if not query.strip():
         return {"retrieved_context": ""}
@@ -100,10 +128,8 @@ def onet_search_node(state: CounselorState) -> dict:
 
 def programs_search_node(state: CounselorState) -> dict:
     """Searches the university's uploaded program PDFs."""
-    messages = state["messages"]
-    cv_data = state.get("cv_data", "")
     university_id = state.get("university_id", "laguardia")
-    query = _build_query(messages, cv_data)
+    query = state.get("search_query") or _build_query(state["messages"], state.get("cv_data", ""))
 
     if not query.strip():
         return {"retrieved_context": state.get("retrieved_context", "")}
@@ -199,20 +225,15 @@ def route_message(state: CounselorState) -> str:
 # ── Graph ─────────────────────────────────────────────────────────────────────
 workflow = StateGraph(CounselorState)
 
-# Search nodes (run in sequence: O*NET first, then university programs on top)
+workflow.add_node("query_reform", query_reformulation_node)
 workflow.add_node("onet_search", onet_search_node)
 workflow.add_node("programs_search", programs_search_node)
-
-# Counselor nodes
 workflow.add_node("intake", intake_node)
 workflow.add_node("detail", detail_node)
 
-# Edges
-workflow.add_conditional_edges(
-    START,
-    route_message,
-    {"intake": "onet_search", "detail": "onet_search"},
-)
+# START → query reformulation → O*NET → university programs → counselor
+workflow.add_edge(START, "query_reform")
+workflow.add_edge("query_reform", "onet_search")
 workflow.add_edge("onet_search", "programs_search")
 workflow.add_conditional_edges(
     "programs_search",
