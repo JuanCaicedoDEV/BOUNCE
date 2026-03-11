@@ -6,7 +6,7 @@ so the counselor agent can filter by tenant.
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_chroma import Chroma
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pathlib import Path
 from pypdf import PdfReader
 import io
